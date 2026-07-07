@@ -45,15 +45,3 @@ export function bungieCredentials(): BungieCredentials {
   return { apiKey, clientId, clientSecret };
 }
 
-export function anthropicApiKey(): string {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    throw new Error(
-      'Missing ANTHROPIC_API_KEY. Set it in .env (or run `ant auth login`).',
-    );
-  }
-  return key;
-}
-
-/** The current 1M-context Opus model driving the agent loop. */
-export const GHOST_MODEL = process.env.GHOST_MODEL || 'claude-opus-4-8';
