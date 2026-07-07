@@ -11,6 +11,7 @@ import {
   setLock,
 } from '../bungie/actions.js';
 import { scoreRoll, type RollTag } from '../scoring/wishlist.js';
+import { getAnnotations, setTags, type TagValue } from '../dimsync/client.js';
 
 /**
  * Destiny Ghost MCP server. Exposes the Bungie read/write operations as tools
@@ -146,6 +147,20 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'get_tags',
+  {
+    description:
+      "Read the player's DIM tags (favorite/keep/infuse/junk/archive) and notes. These live in DIM Sync, DIM's own cloud store — NOT the Bungie API — so they are separate from lock state. Use to see how items are already triaged in DIM before locking or dismantling.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+  },
+  async () => {
+    const tags = await getAnnotations();
+    return text(JSON.stringify({ count: tags.length, tags }, null, 2));
+  },
+);
+
 // ─────────────────────────────── WRITE TOOLS ──────────────────────────────
 // dry_run defaults to true: preview the plan, mutate nothing. The Skill tells
 // the model to show the plan, get an explicit yes, then re-call dry_run=false.
@@ -216,6 +231,32 @@ server.registerTool(
     if (dry_run) return text(`PLAN (not executed): ${verb} ${item.name}.`);
     await setLock(item, characterId, locked);
     return text(`${verb}ed ${item.name}.`);
+  },
+);
+
+server.registerTool(
+  'set_tag',
+  {
+    description:
+      "Set (or clear) the DIM tag on one or more items — favorite/keep/infuse/junk/archive, or null to clear. Tags live in DIM Sync (DIM's cloud), NOT the Bungie API, so this is the DIM-visible complement to set_lock: lock keepers in-game, tag the rest 'infuse'/'junk' so DIM shows the triage. Bulk — pass many items in one call. dry_run=true previews.",
+    inputSchema: {
+      items: z
+        .array(
+          z.object({
+            itemInstanceId: z.string(),
+            tag: z.enum(['favorite', 'keep', 'infuse', 'junk', 'archive']).nullable(),
+          }),
+        )
+        .describe('Items to tag. tag=null clears the tag.'),
+      dry_run: DRY_RUN,
+    },
+    annotations: { destructiveHint: true },
+  },
+  async ({ items, dry_run }) => {
+    const plan = items.map((i) => `${i.tag ?? 'clear'} — ${i.itemInstanceId}`);
+    if (dry_run) return text(`PLAN (not executed) — set ${items.length} DIM tag(s):\n- ${plan.join('\n- ')}`);
+    await setTags(items as Array<{ itemInstanceId: string; tag: TagValue | null }>);
+    return text(`Set ${items.length} DIM tag(s):\n- ${plan.join('\n- ')}`);
   },
 );
 
