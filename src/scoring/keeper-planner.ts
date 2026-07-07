@@ -51,6 +51,15 @@ export interface ReachableCombo {
  * two named perks and a numeric percent, sorted by usage descending. Rows like
  * stat bars ("Range", ".0%") are dropped by the two-perk + positive-pct guard.
  */
+/**
+ * Normalize a perk name for matching. light.gg suffixes enhanced perks with an
+ * asterisk ("Voltshot*"); a copy rolling the base "Voltshot" is the same perk
+ * for keeper purposes, so strip the marker (and surrounding whitespace).
+ */
+export function normalizePerkName(name: string): string {
+  return name.replace(/\*+\s*$/, '').trim();
+}
+
 export function parseLightGgCombos(html: string): LightGgCombo[] {
   const blocks = [
     ...html.matchAll(
@@ -59,7 +68,9 @@ export function parseLightGgCombos(html: string): LightGgCombo[] {
   ];
   const combos: LightGgCombo[] = [];
   for (const [, namesHtml, pctStr] of blocks) {
-    const names = [...namesHtml.matchAll(/<div>\+?\s*([^<]+?)\s*<\/div>/g)].map((m) => m[1].trim());
+    const names = [...namesHtml.matchAll(/<div>\+?\s*([^<]+?)\s*<\/div>/g)].map((m) =>
+      normalizePerkName(m[1]),
+    );
     const pct = parseFloat(pctStr);
     if (names.length === 2 && names[0] && names[1] && pct > 0) {
       combos.push({ trait1: names[0], trait2: names[1], pct });
@@ -90,10 +101,11 @@ export function goodPerksFromCombos(combos: LightGgCombo[]): { trait1: Set<strin
 export function reachableCombos(copies: CopyRolls[], combos: LightGgCombo[]): ReachableCombo[] {
   const out: ReachableCombo[] = [];
   for (const copy of copies) {
-    const t1 = new Set(copy.trait1Options);
-    const t2 = new Set(copy.trait2Options);
+    // Normalize both sides so a base perk matches an enhanced (asterisked) name.
+    const t1 = new Set(copy.trait1Options.map(normalizePerkName));
+    const t2 = new Set(copy.trait2Options.map(normalizePerkName));
     for (const combo of combos) {
-      if (t1.has(combo.trait1) && t2.has(combo.trait2)) {
+      if (t1.has(normalizePerkName(combo.trait1)) && t2.has(normalizePerkName(combo.trait2))) {
         out.push({ itemInstanceId: copy.itemInstanceId, combo });
       }
     }
@@ -125,10 +137,10 @@ export function planKeepers(
   let eligible = copies;
   const ineligible: string[] = [];
   if (requiredAnyOf && requiredAnyOf.length) {
-    const req = new Set(requiredAnyOf);
+    const req = new Set(requiredAnyOf.map(normalizePerkName));
     eligible = [];
     for (const c of copies) {
-      const pool = c.allOptions ?? [...c.trait1Options, ...c.trait2Options];
+      const pool = (c.allOptions ?? [...c.trait1Options, ...c.trait2Options]).map(normalizePerkName);
       if (pool.some((p) => req.has(p))) eligible.push(c);
       else ineligible.push(c.itemInstanceId);
     }

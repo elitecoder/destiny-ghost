@@ -30,6 +30,22 @@ test('parseLightGgCombos extracts only real two-perk combos, sorted by usage', (
   assert.ok(combos[0].pct >= combos[7].pct, 'combos sorted descending by pct');
 });
 
+test('enhanced-perk asterisks are normalized so base rolls match', () => {
+  // light.gg marks enhanced perks with "*". A copy rolling the base perk must
+  // still match, or every combo reads as unreachable (the Voltaic Shade bug).
+  const html = `
+<div class="perk-names"><div>Jolting Feedback*</div><div>+ Voltshot*</div></div><div class="combo-percent">13.05% of Rolls</div>
+`;
+  const combos = parseLightGgCombos(html);
+  assert.deepEqual(combos[0], { trait1: 'Jolting Feedback', trait2: 'Voltshot', pct: 13.05 });
+  const copies: CopyRolls[] = [
+    { itemInstanceId: 'X', powerLevel: 457, trait1Options: ['Jolting Feedback'], trait2Options: ['Voltshot', 'Frenzy'] },
+  ];
+  const { keepers } = planKeepers(copies, combos);
+  assert.equal(keepers.length, 1, 'base perk should match the asterisked combo');
+  assert.equal(keepers[0].itemInstanceId, 'X');
+});
+
 test('goodPerksFromCombos derives the good set ONLY from fetched combos', () => {
   const combos = parseLightGgCombos(SALVO_HTML);
   const good = goodPerksFromCombos(combos);
