@@ -176,6 +176,31 @@ export function invalidateInventory(): void {
   snapshot = null;
 }
 
+/**
+ * Optimistically patch one item's lock state in the cached snapshot after a
+ * confirmed successful lock write. Bungie's GetProfile lags a few seconds
+ * behind a write, so a forced refetch right after locking can still return the
+ * OLD state and then cache it for the full TTL — the source of "locked: false"
+ * lies right after a successful lock. We know exactly what changed, so we apply
+ * it locally instead of trusting a laggy refetch. No-op if nothing is cached.
+ */
+export function patchLockState(itemInstanceId: string, locked: boolean): void {
+  if (!snapshot) return;
+  applyLockPatch(snapshot, itemInstanceId, locked);
+}
+
+/**
+ * Pure snapshot mutation: set one item's lock state in place. Returns true if
+ * the item was found and patched. Extracted so it's unit-testable without the
+ * module-level cache or any network.
+ */
+export function applyLockPatch(inv: GhostInventory, itemInstanceId: string, locked: boolean): boolean {
+  const item = inv.items.find((i) => i.itemInstanceId === itemInstanceId);
+  if (!item) return false;
+  item.locked = locked;
+  return true;
+}
+
 function flatten(res: DestinyProfileResponse, membership: DestinyMembership): GhostInventory {
   const instances = res.itemComponents?.instances?.data ?? {};
   const sockets = res.itemComponents?.sockets?.data ?? {};

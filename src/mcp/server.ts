@@ -23,6 +23,17 @@ import { getAnnotations, setTags, type TagValue } from '../dimsync/client.js';
 
 const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
 
+/**
+ * Read tools cache the account snapshot for ~30s. Right after a lock/transfer
+ * the cache is patched to the known-new state, so a normal read is already
+ * correct. `fresh: true` forces a full Bungie refetch — use it only when you
+ * suspect the snapshot drifted (e.g. the user changed gear in-game).
+ */
+const FRESH = z
+  .boolean()
+  .default(false)
+  .describe('Force a fresh Bungie refetch instead of the ~30s cached snapshot.');
+
 function locationLabel(item: GhostItem): string {
   const loc = item.location;
   if (loc.kind === 'vault') return 'vault';
@@ -96,11 +107,12 @@ server.registerTool(
       characterId: z.string().optional().describe('Optional: scope to one character.'),
       location: z.enum(['vault', 'character', 'equipped', 'postmaster', 'any']).default('any'),
       limit: z.number().int().min(1).max(25).default(10),
+      fresh: FRESH,
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ query, characterId, location, limit }) => {
-    const inv = await getInventory();
+  async ({ query, characterId, location, limit, fresh }) => {
+    const inv = await getInventory({ force: fresh });
     let items = inv.items.filter((i) => matchesText(i, query));
     if (location !== 'any') items = items.filter((i) => i.location.kind === location);
     if (characterId) items = items.filter((i) => 'characterId' in i.location && i.location.characterId === characterId);
@@ -154,11 +166,12 @@ server.registerTool(
       "Show the FULL rolled perks of specific weapons — every selectable option in each perk column, not just the equipped one. This is the ONLY correct basis for dedup/keeper decisions: on modern gear-tier weapons a trait column usually has 2–3 selectable perks, so ONE copy covers MULTIPLE rolls. Never decide what to lock/dismantle from the equipped perk alone (search_inventory/score_items don't show swap options) — call this first. Returns per-copy power, lock state, location, and each column's {selected, options}.",
     inputSchema: {
       itemInstanceIds: z.array(z.string()).describe('Weapon instances to inspect (from search_inventory).'),
+      fresh: FRESH,
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ itemInstanceIds }) => {
-    const inv = await getInventory();
+  async ({ itemInstanceIds, fresh }) => {
+    const inv = await getInventory({ force: fresh });
     const items = itemInstanceIds.map((id) => {
       const item = inv.items.find((i) => i.itemInstanceId === id);
       if (!item) return { itemInstanceId: id, error: 'not found' };

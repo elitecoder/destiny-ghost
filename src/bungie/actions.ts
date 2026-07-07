@@ -6,7 +6,7 @@ import {
   transferItem,
 } from 'bungie-api-ts/destiny2';
 import { authedHttp } from './client.js';
-import { getInventory, invalidateInventory, type GhostItem } from './profile.js';
+import { getInventory, invalidateInventory, patchLockState, type GhostItem } from './profile.js';
 
 /**
  * Write actions against the Bungie API. Every mutation here is reversible at
@@ -136,7 +136,10 @@ export async function setLock(item: GhostItem, characterId: string, locked: bool
     characterId,
     membershipType: (await getInventory()).membership.membershipType,
   });
-  invalidateInventory();
+  // Patch the cache to the known-new state rather than invalidating — a forced
+  // refetch here races Bungie's write-propagation lag and can re-cache the OLD
+  // lock state for the full TTL.
+  patchLockState(item.itemInstanceId!, locked);
 }
 
 /** Pull an item out of the postmaster onto its character (needs room). */
