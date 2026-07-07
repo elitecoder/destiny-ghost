@@ -23,7 +23,21 @@ export interface CopyRolls {
   trait1Options: string[];
   /** All selectable perks in the Trait-2 column. */
   trait2Options: string[];
+  /**
+   * Every perk selectable ANYWHERE on the copy (all columns, incl. barrel/mag).
+   * Used by a required-perk gate — e.g. a grenade launcher must be able to roll
+   * a usable grenade type (Spike/Disorienting) or the trait perks are moot.
+   * Optional: omit to skip the gate.
+   */
+  allOptions?: string[];
 }
+
+/**
+ * A hard prerequisite: the copy must be able to roll at least one of these
+ * perks (in any column) to be eligible as a keeper. For grenade launchers this
+ * is the grenade type — without a usable grenade the trait combo is dead.
+ */
+export type RequiredAnyOf = string[];
 
 /** A combo a specific copy can actually roll (both perks selectable on it). */
 export interface ReachableCombo {
@@ -93,15 +107,33 @@ export function reachableCombos(copies: CopyRolls[], combos: LightGgCombo[]): Re
  * then higher power. Returns keeper ids plus which combos each covers, and any
  * fetched combos that no copy can roll (surface these to the user — do not
  * silently drop them).
+ *
+ * `requiredAnyOf` is a hard prerequisite gate: a copy that cannot roll any of
+ * the required perks (checked against `allOptions`, falling back to the two
+ * trait columns) is dropped before cover — its trait combos don't count. This
+ * is how the grenade-type filter works (keep only Spike/Disorienting copies).
  */
 export function planKeepers(
   copies: CopyRolls[],
   combos: LightGgCombo[],
+  requiredAnyOf?: RequiredAnyOf,
 ): {
   keepers: Array<{ itemInstanceId: string; covers: LightGgCombo[] }>;
   unreachableCombos: LightGgCombo[];
+  ineligible: string[];
 } {
-  const reachable = reachableCombos(copies, combos);
+  let eligible = copies;
+  const ineligible: string[] = [];
+  if (requiredAnyOf && requiredAnyOf.length) {
+    const req = new Set(requiredAnyOf);
+    eligible = [];
+    for (const c of copies) {
+      const pool = c.allOptions ?? [...c.trait1Options, ...c.trait2Options];
+      if (pool.some((p) => req.has(p))) eligible.push(c);
+      else ineligible.push(c.itemInstanceId);
+    }
+  }
+  const reachable = reachableCombos(eligible, combos);
   const comboKey = (c: LightGgCombo) => `${c.trait1}|${c.trait2}`;
 
   const reachableKeys = new Set(reachable.map((r) => comboKey(r.combo)));
@@ -110,7 +142,7 @@ export function planKeepers(
   // itemInstanceId → set of combo keys it can roll.
   const byCopy = new Map<string, { copy: CopyRolls; keys: Set<string> }>();
   for (const r of reachable) {
-    const copy = copies.find((c) => c.itemInstanceId === r.itemInstanceId)!;
+    const copy = eligible.find((c) => c.itemInstanceId === r.itemInstanceId)!;
     if (!byCopy.has(r.itemInstanceId)) byCopy.set(r.itemInstanceId, { copy, keys: new Set() });
     byCopy.get(r.itemInstanceId)!.keys.add(comboKey(r.combo));
   }
@@ -136,5 +168,5 @@ export function planKeepers(
     for (const k of keys) uncovered.delete(k);
   }
 
-  return { keepers, unreachableCombos };
+  return { keepers, unreachableCombos, ineligible };
 }

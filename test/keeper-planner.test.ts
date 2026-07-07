@@ -64,6 +64,21 @@ test('reachableCombos only credits combos a copy can actually roll', () => {
   assert.equal(reachable.filter((r) => r.itemInstanceId === 'A').length, 2);
 });
 
+test('planKeepers with requiredAnyOf drops copies lacking a required perk (grenade gate)', () => {
+  const combos = parseLightGgCombos(SALVO_HTML);
+  // Two copies: one can roll Spike, one cannot. Both share a good trait combo.
+  const glCopies: CopyRolls[] = [
+    { itemInstanceId: 'SPIKE', powerLevel: 400, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], allOptions: ['Demolitionist', 'Gear Shift', 'Spike Grenades', 'Disorienting Grenades'] },
+    { itemInstanceId: 'NONADE', powerLevel: 482, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], allOptions: ['Demolitionist', 'Gear Shift', 'High-Velocity Rounds', 'Implosion Rounds'] },
+  ];
+  const { keepers, ineligible } = planKeepers(glCopies, combos, ['Spike Grenades', 'Disorienting Grenades']);
+  const keptIds = keepers.map((k) => k.itemInstanceId);
+  // NONADE has the same trait combo but no usable grenade — gated out even
+  // though it's higher power and would otherwise win the tie.
+  assert.deepEqual(keptIds, ['SPIKE']);
+  assert.deepEqual(ineligible, ['NONADE']);
+});
+
 test('planKeepers picks the minimal cover and never keeps the hallucination copy', () => {
   const combos = parseLightGgCombos(SALVO_HTML);
   const { keepers, unreachableCombos } = planKeepers(COPIES, combos);
