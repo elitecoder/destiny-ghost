@@ -148,6 +148,34 @@ server.registerTool(
 );
 
 server.registerTool(
+  'inspect_rolls',
+  {
+    description:
+      "Show the FULL rolled perks of specific weapons — every selectable option in each perk column, not just the equipped one. This is the ONLY correct basis for dedup/keeper decisions: on modern gear-tier weapons a trait column usually has 2–3 selectable perks, so ONE copy covers MULTIPLE rolls. Never decide what to lock/dismantle from the equipped perk alone (search_inventory/score_items don't show swap options) — call this first. Returns per-copy power, lock state, location, and each column's {selected, options}.",
+    inputSchema: {
+      itemInstanceIds: z.array(z.string()).describe('Weapon instances to inspect (from search_inventory).'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ itemInstanceIds }) => {
+    const inv = await getInventory();
+    const items = itemInstanceIds.map((id) => {
+      const item = inv.items.find((i) => i.itemInstanceId === id);
+      if (!item) return { itemInstanceId: id, error: 'not found' };
+      return {
+        itemInstanceId: id,
+        name: item.name,
+        power: item.powerLevel,
+        locked: item.locked,
+        location: locationLabel(item),
+        columns: item.perkColumns.map((c) => ({ selected: c.selected, options: c.options })),
+      };
+    });
+    return text(JSON.stringify({ items }, null, 2));
+  },
+);
+
+server.registerTool(
   'get_tags',
   {
     description:

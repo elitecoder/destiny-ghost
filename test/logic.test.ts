@@ -14,6 +14,7 @@ function item(overrides: Partial<GhostItem>): GhostItem {
     equipped: false,
     location: { kind: 'vault' },
     plugHashes: [],
+    perkColumns: [],
     ...overrides,
   };
 }
