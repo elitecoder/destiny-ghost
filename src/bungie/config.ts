@@ -1,8 +1,13 @@
 import { config as loadEnv } from 'dotenv';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-loadEnv();
+// Load .env by absolute path from the repo root (two levels up from src/bungie/),
+// not the process cwd — the MCP server is launched from whatever dir the client
+// happens to be in, so a cwd-relative lookup would miss the credentials.
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+loadEnv({ path: join(REPO_ROOT, '.env') });
 
 /**
  * Bungie OAuth + API configuration. All three values come from a Bungie app
