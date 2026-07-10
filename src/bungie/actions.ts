@@ -128,18 +128,41 @@ export async function equipMany(
   }));
 }
 
-/** Lock or unlock an item (reversible; the vault-cleaner keep/reject action). */
+/**
+ * Lock or unlock an item (reversible; the vault-cleaner keep/reject action).
+ *
+ * IMPORTANT: for a VAULT item the SetLock endpoint returns Success but SILENTLY
+ * NO-OPS unless the passed characterId is one the item is actually associated
+ * with (empirically confirmed — only one of the three characters applies the
+ * change for a given vault item). Passing a fixed character (e.g. characters[0])
+ * fails silently for ~2/3 of vault items. So we try the supplied character
+ * first, then fall back through every other character, re-reading lock state
+ * until it actually flips. Throws if no character can apply it.
+ */
 export async function setLock(item: GhostItem, characterId: string, locked: boolean): Promise<void> {
-  await setItemLockState(authedHttp, {
-    state: locked,
-    itemId: item.itemInstanceId!,
-    characterId,
-    membershipType: (await getInventory()).membership.membershipType,
-  });
-  // Patch the cache to the known-new state rather than invalidating — a forced
-  // refetch here races Bungie's write-propagation lag and can re-cache the OLD
-  // lock state for the full TTL.
-  patchLockState(item.itemInstanceId!, locked);
+  const inv = await getInventory();
+  const membershipType = inv.membership.membershipType;
+  // Ordered candidate characters: the caller's first, then the rest.
+  const candidates = [characterId, ...inv.characters.map((c) => c.characterId).filter((c) => c !== characterId)];
+
+  for (const cid of candidates) {
+    await setItemLockState(authedHttp, {
+      state: locked,
+      itemId: item.itemInstanceId!,
+      characterId: cid,
+      membershipType,
+    });
+    // The API lies (Success on a no-op), so confirm against a fresh fetch.
+    const fresh = await getInventory({ force: true });
+    const now = fresh.items.find((i) => i.itemInstanceId === item.itemInstanceId)?.locked;
+    if (now === locked) {
+      patchLockState(item.itemInstanceId!, locked);
+      return;
+    }
+  }
+  throw new Error(
+    `Failed to ${locked ? 'lock' : 'unlock'} ${item.name} (${item.itemInstanceId}) via any character.`,
+  );
 }
 
 /** Pull an item out of the postmaster onto its character (needs room). */
