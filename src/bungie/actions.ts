@@ -131,17 +131,20 @@ export async function equipMany(
 /**
  * Lock or unlock an item (reversible; the vault-cleaner keep/reject action).
  *
- * Trust the SetLock response, NOT a read-back. Bungie's SetLock returns
- * ErrorCode 1 (Success) when it accepts the write, and a single character's
- * request applies to a vault item regardless of which character issues it. But
- * GetProfile is eventually-consistent — it lags the write by 30-40s (its
- * responses are CDN-cached) — so verifying by an immediate forced refetch reads
- * the OLD lock state, reports a false "failed", AND caches that stale state for
- * the full TTL. (The old "only one of three characters works, confirm by
- * refetch" belief was itself a misread of this lag.) So we trust ErrorCode and
- * patch the cached snapshot locally. Characters are tried in order only as a
- * fallback for a genuine non-Success code; we throw with the real codes only if
- * every character rejects the write.
+ * Trust the SetLock response, NOT a read-back. The HTTP client returns only on
+ * ErrorCode 1 (Success) and throws BungieError otherwise, so a normal return
+ * means the write was accepted. We patch the cached snapshot locally rather than
+ * verifying via GetProfile, because GetProfile is eventually-consistent — it
+ * lags the write by 30-40s (its responses are CDN-cached) — so an immediate
+ * forced refetch reads the OLD lock state, reports a false "failed", AND caches
+ * that stale state for the full TTL. (The old "only one of three characters
+ * works, confirm by refetch" belief was itself a misread of this lag.)
+ *
+ * We still try each character in turn, because a character CANNOT act on an item
+ * held by a DIFFERENT character — that throws DestinyItemNotFound. Vault items
+ * work from any character; a character-held item works only from its owner. So
+ * we catch each per-character throw and try the next; we rethrow only if every
+ * character rejects the write.
  */
 export async function setLock(item: GhostItem, characterId: string, locked: boolean): Promise<void> {
   const inv = await getInventory();
@@ -151,17 +154,18 @@ export async function setLock(item: GhostItem, characterId: string, locked: bool
 
   const failures: string[] = [];
   for (const cid of candidates) {
-    const res = await setItemLockState(authedHttp, {
-      state: locked,
-      itemId: item.itemInstanceId!,
-      characterId: cid,
-      membershipType,
-    });
-    if (res.ErrorCode === 1) {
+    try {
+      await setItemLockState(authedHttp, {
+        state: locked,
+        itemId: item.itemInstanceId!,
+        characterId: cid,
+        membershipType,
+      });
       patchLockState(item.itemInstanceId!, locked);
       return;
+    } catch (e) {
+      failures.push(`char ${cid}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    failures.push(`char ${cid}: ${res.ErrorStatus} (${res.ErrorCode})`);
   }
   throw new Error(
     `Failed to ${locked ? 'lock' : 'unlock'} ${item.name} (${item.itemInstanceId}): ${failures.join('; ')}`,
