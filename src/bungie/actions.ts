@@ -131,13 +131,17 @@ export async function equipMany(
 /**
  * Lock or unlock an item (reversible; the vault-cleaner keep/reject action).
  *
- * IMPORTANT: for a VAULT item the SetLock endpoint returns Success but SILENTLY
- * NO-OPS unless the passed characterId is one the item is actually associated
- * with (empirically confirmed — only one of the three characters applies the
- * change for a given vault item). Passing a fixed character (e.g. characters[0])
- * fails silently for ~2/3 of vault items. So we try the supplied character
- * first, then fall back through every other character, re-reading lock state
- * until it actually flips. Throws if no character can apply it.
+ * Trust the SetLock response, NOT a read-back. Bungie's SetLock returns
+ * ErrorCode 1 (Success) when it accepts the write, and a single character's
+ * request applies to a vault item regardless of which character issues it. But
+ * GetProfile is eventually-consistent — it lags the write by 30-40s (its
+ * responses are CDN-cached) — so verifying by an immediate forced refetch reads
+ * the OLD lock state, reports a false "failed", AND caches that stale state for
+ * the full TTL. (The old "only one of three characters works, confirm by
+ * refetch" belief was itself a misread of this lag.) So we trust ErrorCode and
+ * patch the cached snapshot locally. Characters are tried in order only as a
+ * fallback for a genuine non-Success code; we throw with the real codes only if
+ * every character rejects the write.
  */
 export async function setLock(item: GhostItem, characterId: string, locked: boolean): Promise<void> {
   const inv = await getInventory();
@@ -145,23 +149,22 @@ export async function setLock(item: GhostItem, characterId: string, locked: bool
   // Ordered candidate characters: the caller's first, then the rest.
   const candidates = [characterId, ...inv.characters.map((c) => c.characterId).filter((c) => c !== characterId)];
 
+  const failures: string[] = [];
   for (const cid of candidates) {
-    await setItemLockState(authedHttp, {
+    const res = await setItemLockState(authedHttp, {
       state: locked,
       itemId: item.itemInstanceId!,
       characterId: cid,
       membershipType,
     });
-    // The API lies (Success on a no-op), so confirm against a fresh fetch.
-    const fresh = await getInventory({ force: true });
-    const now = fresh.items.find((i) => i.itemInstanceId === item.itemInstanceId)?.locked;
-    if (now === locked) {
+    if (res.ErrorCode === 1) {
       patchLockState(item.itemInstanceId!, locked);
       return;
     }
+    failures.push(`char ${cid}: ${res.ErrorStatus} (${res.ErrorCode})`);
   }
   throw new Error(
-    `Failed to ${locked ? 'lock' : 'unlock'} ${item.name} (${item.itemInstanceId}) via any character.`,
+    `Failed to ${locked ? 'lock' : 'unlock'} ${item.name} (${item.itemInstanceId}): ${failures.join('; ')}`,
   );
 }
 
