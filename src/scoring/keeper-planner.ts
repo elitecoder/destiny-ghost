@@ -57,7 +57,10 @@ export interface ReachableCombo {
  * for keeper purposes, so strip the marker (and surrounding whitespace).
  */
 export function normalizePerkName(name: string): string {
-  return name.replace(/\*+\s*$/, '').trim();
+  return name
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'") // curly quotes -> straight
+    .replace(/\*+\s*$/, '')
+    .trim();
 }
 
 export function parseLightGgCombos(html: string): LightGgCombo[] {
