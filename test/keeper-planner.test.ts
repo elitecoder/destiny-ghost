@@ -95,6 +95,36 @@ test('planKeepers with requiredAnyOf drops copies lacking a required perk (grena
   assert.deepEqual(ineligible, ['NONADE']);
 });
 
+test('planKeepers ties toward an already-locked copy over a higher-power unlocked one', () => {
+  const combos = parseLightGgCombos(SALVO_HTML);
+  // Both copies roll the exact same reachable combo (Demo+Gear Shift). UNLOCKED
+  // has higher power, but LOCKED should still win the tie so we don't lock a
+  // new copy when an existing locked one already covers the same ground.
+  const copies: CopyRolls[] = [
+    { itemInstanceId: 'LOCKED', powerLevel: 400, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], locked: true },
+    { itemInstanceId: 'UNLOCKED', powerLevel: 482, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], locked: false },
+  ];
+  const { keepers } = planKeepers(copies, combos);
+  assert.deepEqual(keepers.map((k) => k.itemInstanceId), ['LOCKED']);
+});
+
+test('planKeepers still breaks ties by power when neither or both copies are locked', () => {
+  const combos = parseLightGgCombos(SALVO_HTML);
+  // Neither locked: higher power wins, same as before the locked-preference fix.
+  const neitherLocked: CopyRolls[] = [
+    { itemInstanceId: 'LOW', powerLevel: 400, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'] },
+    { itemInstanceId: 'HIGH', powerLevel: 482, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'] },
+  ];
+  assert.deepEqual(planKeepers(neitherLocked, combos).keepers.map((k) => k.itemInstanceId), ['HIGH']);
+
+  // Both locked: higher power still wins the tie between two locked copies.
+  const bothLocked: CopyRolls[] = [
+    { itemInstanceId: 'LOW', powerLevel: 400, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], locked: true },
+    { itemInstanceId: 'HIGH', powerLevel: 482, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], locked: true },
+  ];
+  assert.deepEqual(planKeepers(bothLocked, combos).keepers.map((k) => k.itemInstanceId), ['HIGH']);
+});
+
 test('planKeepers picks the minimal cover and never keeps the hallucination copy', () => {
   const combos = parseLightGgCombos(SALVO_HTML);
   const { keepers, unreachableCombos } = planKeepers(COPIES, combos);

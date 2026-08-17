@@ -35,6 +35,55 @@ const COMPONENTS = [
 const WEAPON_PERKS_CATEGORY = 4241085061;
 
 /**
+ * The six armor stats, in canonical display order. These stat hashes are
+ * game-stable (verified against Mijago/D2ArmorPicker's ArmorStatHashes AND
+ * Bungie's own DestinyStatDefinition manifest). Armor 3.0 (Edge of Fate)
+ * RENAMED the stats — same hashes, new display names — so we use the current
+ * in-game names. Legacy names in parentheses for reference:
+ *   2996146975  Weapons   (was Mobility)
+ *   392767087   Health    (was Resilience)
+ *   1943323491  Class     (was Recovery)  — note: NOT the legacy 1943323000
+ *   1735777505  Grenade   (was Discipline)
+ *   144602215   Super     (was Intellect)
+ *   4244567218  Melee     (was Strength)
+ */
+export type StatName = 'Weapons' | 'Health' | 'Class' | 'Grenade' | 'Super' | 'Melee';
+export const STAT_ORDER: StatName[] = ['Weapons', 'Health', 'Class', 'Grenade', 'Super', 'Melee'];
+export type ArmorStats = Record<StatName, number>;
+const ARMOR_STAT_HASH_TO_NAME: Record<number, StatName> = {
+  2996146975: 'Weapons',
+  392767087: 'Health',
+  1943323491: 'Class',
+  1735777505: 'Grenade',
+  144602215: 'Super',
+  4244567218: 'Melee',
+};
+
+/**
+ * Read the six armor stats from the ItemStats (304) component. These are the
+ * per-stat values Bungie reports for the piece — base roll + current upgrade
+ * (masterwork) level + any socketed stat mods (i.e. exactly what the player
+ * sees in DIM/in-game). The loadout solver derives the piece's own stats
+ * (base + upgrade, mods removed) by subtracting socketed stat-mod bonuses, so
+ * it can re-plan mods within the energy budget; this field is for display and
+ * quick reasoning. Returns undefined for non-armor (weapons have no armor-stat
+ * entries).
+ */
+export function armorStatsFromComponent(comp: { stats?: Record<number, { statHash: number; value: number }> } | undefined): ArmorStats | undefined {
+  if (!comp?.stats) return undefined;
+  const out = { Weapons: 0, Health: 0, Class: 0, Grenade: 0, Super: 0, Melee: 0 } as ArmorStats;
+  let found = false;
+  for (const [key, stat] of Object.entries(comp.stats)) {
+    const name = ARMOR_STAT_HASH_TO_NAME[Number(key)];
+    if (name) {
+      out[name] = stat.value;
+      found = true;
+    }
+  }
+  return found ? out : undefined;
+}
+
+/**
  * One perk column on a weapon: the currently-selected plug plus EVERY plug this
  * specific copy can switch to in that column. On gear-tier weapons a trait
  * column commonly has 2–3 selectable perks, so a single copy covers multiple
@@ -114,6 +163,8 @@ export interface GhostItem {
   itemHash: number;
   name: string;
   itemType: string; // e.g. "Hand Cannon", "Helmet"
+  /** Class restriction from the item def: 0=Titan, 1=Hunter, 2=Warlock, 3=Any. */
+  classType: number;
   tierType: string; // "Legendary" | "Exotic" | ...
   slot?: string; // bucket display name
   element?: string; // damage type name
@@ -130,6 +181,22 @@ export interface GhostItem {
    * dedup: it exposes every perk a copy can roll to, not just the equipped one.
    */
   perkColumns: PerkColumn[];
+  /**
+   * The six armor stats (Mobility/Resilience/Recovery/Discipline/Intellect/
+   * Strength), as reported by the ItemStats component — base roll + current
+   * masterwork + socketed stat mods. Undefined for non-armor. The loadout
+   * solver re-derives clean base stats from stat plugs when re-planning mods.
+   */
+  stats?: ArmorStats;
+  /** Armor energy capacity (the mod budget). Armor 2.0 caps at 10; Armor 3.0 tier-5 reports 11. Undefined for non-armor. */
+  energyCapacity?: number;
+  /** Armor 3.0 gear tier (1–5), present only on Armor 3.0 pieces. Undefined for Armor 2.0 / non-armor. */
+  gearTier?: number;
+  /**
+   * True when the item has a Masterwork plug inserted (DestinyItemState bit 4).
+   * For exotic weapons this means the catalyst is completed & applied.
+   */
+  masterworked?: boolean;
 }
 
 export interface GhostCharacter {
@@ -205,6 +272,7 @@ function flatten(res: DestinyProfileResponse, membership: DestinyMembership): Gh
   const instances = res.itemComponents?.instances?.data ?? {};
   const sockets = res.itemComponents?.sockets?.data ?? {};
   const reusablePlugs = res.itemComponents?.reusablePlugs?.data ?? {};
+  const statsData = res.itemComponents?.stats?.data ?? {};
 
   /**
    * Build the per-column perk view for one instanced weapon. Uses the item
@@ -253,21 +321,27 @@ function flatten(res: DestinyProfileResponse, membership: DestinyMembership): Gh
       .filter((s: any) => s.isEnabled && s.plugHash)
       .map((s: any) => s.plugHash as number);
     const damageHash = instance?.damageTypeHash;
+    const energyCapacity = instance?.energy?.energyCapacity;
     items.push({
       itemInstanceId: raw.itemInstanceId,
       itemHash: raw.itemHash,
       name: def.displayProperties?.name ?? `Item ${raw.itemHash}`,
       itemType: def.itemTypeDisplayName ?? 'Unknown',
+      classType: def.classType ?? 3,
       tierType: def.inventory?.tierTypeName ?? 'Unknown',
       slot: bucketDef(def.inventory?.bucketTypeHash ?? 0)?.displayProperties?.name,
       element: damageHash ? damageTypeDef(damageHash)?.displayProperties?.name : undefined,
       powerLevel: instance?.primaryStat?.value,
-      // state is a bitflag: 1 = locked.
+      // state is a bitflag: 1 = locked, 4 = masterwork plug inserted (exotic catalyst done).
       locked: ((raw.state ?? 0) & 1) === 1,
+      masterworked: ((raw.state ?? 0) & 4) === 4,
       equipped,
       location,
       plugHashes,
       perkColumns: buildPerkColumns(raw),
+      stats: armorStatsFromComponent(raw.itemInstanceId ? statsData[raw.itemInstanceId] : undefined),
+      energyCapacity,
+      gearTier: (instance as any)?.gearTier,
     });
   };
 

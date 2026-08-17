@@ -14,6 +14,7 @@ function item(id: string, locked: boolean): GhostItem {
     location: { kind: 'vault' },
     plugHashes: [],
     perkColumns: [],
+    classType: 3,
   };
 }
 

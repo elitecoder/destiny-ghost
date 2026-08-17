@@ -18,14 +18,34 @@ If a tool call fails with "Not authenticated" or the MCP tools aren't present:
   the MCP server with `claude mcp add destiny-ghost -- npx tsx ~/dev/destiny-ghost/src/mcp/server.ts`.
 - Do not try to fix auth yourself — surface the step and stop.
 
+## Armor 3.0 stat names (IMPORTANT)
+
+The game **renamed the six armor stats** in Edge of Fate (Armor 3.0). The hashes
+are unchanged but the names the player sees are now:
+
+| Hash | Old name | Current (use THESE) |
+|---|---|---|
+| 2996146975 | Mobility | **Weapons** |
+| 392767087 | Resilience | **Health** |
+| 1943323491 | Recovery | **Class** |
+| 1735777505 | Discipline | **Grenade** |
+| 144602215 | Intellect | **Super** |
+| 4244567218 | Strength | **Melee** |
+
+When the user says "resilience" or "recovery", they often still mean the old
+names — **translate to the current name** (Resilience→Health, Recovery→Class,
+Discipline→Grenade, Intellect→Super, Strength→Melee, Mobility→Weapons) before
+targeting them in `find_armor_set`. The tool only accepts the current names.
+
 ## The tools
 
 **Read (safe, call freely):**
 - `get_character_state` — characters, class, power, ids; vault free-space; postmaster counts. Call this first when you need a `characterId`.
-- `search_inventory` — resolve fuzzy gear language → concrete items with `itemInstanceId`. Always call this before any write to get the exact item.
+- `search_inventory` — resolve fuzzy gear language → concrete items with `itemInstanceId`. Always call this before any write to get the exact item. Armor results include `stats` (the six Armor 3.0 stats), `energyCapacity`, and `gearTier`.
 - `score_items` — grade weapons against the DIM wishlist (PvE/PvP), returns S/A/B/C/D/F tiers. Use for "is this good?" and triage. **Shows only the equipped perk — never dedup from this alone.**
 - `inspect_rolls` — the FULL rolled perks of specific weapons: every selectable option in each column, not just the equipped one. **Mandatory before any keep/dismantle decision** (see the dedup rule below).
 - `get_tags` — read the player's DIM tags (favorite/keep/infuse/junk/archive). DIM Sync data, separate from lock state.
+- `find_armor_set` — **Armor 3.0 loadout feasibility oracle.** Given a `characterId`, target stat minimums (current names: Weapons/Health/Class/Grenade/Super/Melee), an exotic constraint (`'any'` / `'none'` / an exact exotic name), optional `fragments` stat deltas, and optional `setConstraints` (e.g. 2× "Smoke Jumper" + 2× "Thunderhead" for set bonuses), searches ALL the player's armor for a 5-piece set that hits the targets. Armor 3.0 stat-mod model: **one stat mod per piece** (minor +5 / major +10), so a set has at most 5 stat mods total (max +50 to one stat) — not an unlimited shared pool. Returns feasible sets (pieces + mod plan + final stats) or a NO with farm guidance (bottleneck stat, weakest slot, shortfall, archetype(s) to farm). Honors actual per-piece upgrade state; excludes artifice. Use for "can I build this from what I own, or do I need to farm?" See the worked example below.
 
 **Write (every one takes `dry_run`, default true):**
 - `transfer_item` — move to vault or a character (char→char is multi-step via the vault).
@@ -96,6 +116,12 @@ When choosing which copies of a duplicated weapon to keep vs. dismantle:
 
 Armor is not deduped like weapons. Use `planArmorKeepers` (src/scoring/armor-planner.ts).
 
+**Kept archetypes** (triage per-tertiary, T73 floor):
+Gunner, Grenadier, Demolitionist, Skirmisher, Paragon
+
+**Nuked archetypes** (mass reject all copies):
+Specialist, Colossus, Reaver, Bulwark, Brawler, Powerhouse, **Siegebreaker** (added 2026-08-08)
+
 1. **Group by archetype** (the intrinsic perk: Gunner/Grenadier/…), then by
    tertiary stat. Keep the top piece per tertiary within each kept archetype.
 2. **Enforce a minimum-total FLOOR.** Never keep a piece below the floor, even
@@ -124,6 +150,19 @@ Armor is not deduped like weapons. Use `planArmorKeepers` (src/scoring/armor-pla
 - Don't dump the whole inventory. Surface the few items that matter, by name.
 
 ## Worked examples
+
+**"Can I hit 100 Health / 90 Class / 80 Grenade on my Warlock, using Nezarec's Sin?"**
+→ First translate any legacy stat names the user used (Resilience→Health,
+Recovery→Class, Discipline→Grenade, etc.). → `get_character_state` for the
+Warlock `characterId` → `find_armor_set` with `characterId`,
+`target:{Health:100,Class:90,Grenade:80}`, `exotic:"Nezarec's Sin"`, and any
+`fragments` they named. → If `feasible:true`, show the top set: the 5 pieces by
+name + slot, the mod plan (e.g. "Health +30: 4 minor 1 major, 7 energy"), and
+final stats. Offer to `transfer_item`/`equip_item` the pieces (confirm first).
+→ If `feasible:false`, surface the guidance verbatim: bottleneck stat, weakest
+slot, shortfall, and the archetype(s) to farm (e.g. "farm a Chest Armor,
+Siegebreaker archetype, Health primary, total ≥ T73"). Do NOT invent a set the
+tool didn't return — the oracle is authoritative.
 
 **"What's my best PvP hand cannon?"**
 → `search_inventory query:"hand cannon"` → `score_items` on the results with

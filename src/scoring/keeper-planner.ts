@@ -30,6 +30,10 @@ export interface CopyRolls {
    * Optional: omit to skip the gate.
    */
   allOptions?: string[];
+  /** Whether this copy is already locked in-game. When set, the planner
+   *  prefers it in tie-breaking so we don't lock new copies when an existing
+   *  locked copy covers the same combos. Optional: omit to ignore lock state. */
+  locked?: boolean;
 }
 
 /**
@@ -167,13 +171,18 @@ export function planKeepers(
   const comboByKey = new Map(combos.map((c) => [comboKey(c), c]));
 
   while (uncovered.size > 0) {
-    let best: { id: string; gain: number; power: number } | null = null;
+    let best: { id: string; gain: number; power: number; locked?: boolean } | null = null;
     for (const [id, { copy, keys }] of byCopy) {
       if (keepers.some((k) => k.itemInstanceId === id)) continue;
       const gain = [...keys].filter((k) => uncovered.has(k)).length;
       if (gain === 0) continue;
-      if (!best || gain > best.gain || (gain === best.gain && copy.powerLevel > best.power)) {
-        best = { id, gain, power: copy.powerLevel };
+      if (
+        !best ||
+        gain > best.gain ||
+        (gain === best.gain && (copy.locked ?? false) && !(best.locked ?? false)) ||
+        (gain === best.gain && (copy.locked ?? false) === (best.locked ?? false) && copy.powerLevel > best.power)
+      ) {
+        best = { id, gain, power: copy.powerLevel, locked: copy.locked };
       }
     }
     if (!best) break; // no copy covers any remaining combo

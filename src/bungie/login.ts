@@ -6,6 +6,19 @@ import { resolveCert } from './certs.js';
 import { exchangeCode } from './tokens.js';
 
 /**
+ * OAuth scopes to request. Must be a subset of the scopes the Bungie app is
+ * registered for. Requesting them explicitly (rather than relying on the
+ * default grant) is required to unlock triumph/record/progression data —
+ * ProfileRecords/CharacterRecords are gated behind ReadDestinyVendorsAndAdvisors
+ * (per Bungie's API FAQ), without which catalysts/triumphs come back empty.
+ */
+const SCOPES = [
+  'ReadDestinyInventoryAndVault',
+  'ReadDestinyVendorsAndAdvisors',
+  'MoveOrEquipDestinyGear',
+].join(' ');
+
+/**
  * Run the full browser OAuth round-trip and persist the tokens. Opens a
  * localhost HTTPS server on CALLBACK_PORT, sends the user to Bungie's authorize
  * page, and exchanges the returned code. Resolves once tokens are stored.
@@ -13,7 +26,9 @@ import { exchangeCode } from './tokens.js';
 export async function runLogin(): Promise<void> {
   const { clientId } = bungieCredentials();
   const state = randomBytes(16).toString('hex');
-  const authorizeUrl = `${AUTHORIZE_URL}?client_id=${clientId}&response_type=code&state=${state}`;
+  const authorizeUrl =
+    `${AUTHORIZE_URL}?client_id=${clientId}&response_type=code&state=${state}` +
+    `&scope=${encodeURIComponent(SCOPES)}`;
   const tls = resolveCert();
 
   await new Promise<void>((resolve, reject) => {

@@ -15,6 +15,7 @@ function item(overrides: Partial<GhostItem>): GhostItem {
     location: { kind: 'vault' },
     plugHashes: [],
     perkColumns: [],
+    classType: 3,
     ...overrides,
   };
 }

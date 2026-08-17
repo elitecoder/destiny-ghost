@@ -9,6 +9,8 @@ export interface StoredTokens {
   /** epoch ms when the refresh token expires */
   refreshExpiresAt: number;
   membershipId: string;
+  /** Space-separated OAuth scopes granted at auth time (for verification). */
+  scope?: string;
 }
 
 interface BungieTokenResponse {
@@ -17,6 +19,7 @@ interface BungieTokenResponse {
   refresh_token: string;
   refresh_expires_in: number;
   membership_id: string;
+  scope?: string;
 }
 
 /** Refresh the access token this many ms before it actually expires. */
@@ -49,6 +52,7 @@ function toStored(res: BungieTokenResponse): StoredTokens {
     accessExpiresAt: now + res.expires_in * 1000,
     refreshExpiresAt: now + res.refresh_expires_in * 1000,
     membershipId: res.membership_id,
+    scope: res.scope,
   };
 }
 

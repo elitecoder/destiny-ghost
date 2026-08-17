@@ -17,6 +17,10 @@ const TABLES = [
   'DestinyInventoryBucketDefinition',
   'DestinyDamageTypeDefinition',
   'DestinyClassDefinition',
+  'DestinyRecordDefinition',
+  'DestinyPresentationNodeDefinition',
+  'DestinyObjectiveDefinition',
+  'DestinyChecklistDefinition',
 ] as const;
 export type ManifestTable = (typeof TABLES)[number];
 
@@ -105,6 +109,18 @@ export function damageTypeDef(hash: number): any | undefined {
 }
 export function classDef(hash: number): any | undefined {
   return table('DestinyClassDefinition')[hash];
+}
+export function recordDef(hash: number): any | undefined {
+  return table('DestinyRecordDefinition')[hash];
+}
+export function presentationNodeDef(hash: number): any | undefined {
+  return table('DestinyPresentationNodeDefinition')[hash];
+}
+export function objectiveDef(hash: number): any | undefined {
+  return table('DestinyObjectiveDefinition')[hash];
+}
+export function checklistDef(hash: number): any | undefined {
+  return table('DestinyChecklistDefinition')[hash];
 }
 
 /** Human-readable name for an item definition hash. */

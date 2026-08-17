@@ -12,6 +12,7 @@ import {
 } from '../bungie/actions.js';
 import { scoreRoll, type RollTag } from '../scoring/wishlist.js';
 import { getAnnotations, setTags, type TagValue } from '../dimsync/client.js';
+import { solveLoadout, slotOf, type LoadoutPiece, type LoadoutTarget } from '../scoring/loadout-planner.js';
 
 /**
  * Destiny Ghost MCP server. Exposes the Bungie read/write operations as tools
@@ -54,6 +55,9 @@ function summarize(item: GhostItem): Record<string, unknown> {
     locked: item.locked,
     equipped: item.equipped,
     location: locationLabel(item),
+    stats: item.stats,
+    energyCapacity: item.energyCapacity,
+    gearTier: item.gearTier,
   };
 }
 
@@ -210,6 +214,67 @@ const DRY_RUN = z
   .boolean()
   .default(true)
   .describe('When true (default), return the plan without mutating. Set false only after the user has explicitly confirmed.');
+
+const STAT_ENUM = z.enum(['Weapons', 'Health', 'Class', 'Grenade', 'Super', 'Melee']);
+
+server.registerTool(
+  'find_armor_set',
+  {
+    description:
+      "Armor 3.0 loadout feasibility oracle. Given a character, target stat minimums, an exotic constraint, and optional fragment stat deltas, searches ALL of the player's armor (vault + inventory + equipped, every slot) for a 5-piece set that can hit the targets with stat mods. Answers: 'YES, here are the pieces + the mod plan' or 'NO, you need to farm' — in which case it names the bottleneck stat, the weakest slot, the shortfall, and the archetype(s) to farm. Armor 3.0 stats are Weapons/Health/Class/Grenade/Super/Melee (NOT the old Mobility/Resilience/...). Stat mods: minor +5 (1 energy) / major +10 (3 energy); artifice is excluded. Masterwork/upgrade state is honored per-piece (not assumed). Read-only — previews sets, moves nothing.",
+    inputSchema: {
+      characterId: z.string().describe('The character to build for (from get_character_state). Determines the class.'),
+      target: z.record(STAT_ENUM, z.number()).describe('Minimum desired per stat. Only the stats you care about, e.g. {Health:100, Class:90, Grenade:80}.'),
+      exotic: z.string().default('any').describe("Exotic constraint: a specific exotic name (must match exactly, e.g. 'Heart of Innermost Light'), 'any' (at most one exotic), or 'none' (legendaries only)."),
+      fragments: z.record(STAT_ENUM, z.number()).optional().describe('Fragment stat deltas, e.g. {Health:10, Weapons:-5}. Positive = bonus, negative = penalty.'),
+      setConstraints: z
+        .array(
+          z.object({
+            name: z.string().describe("A substring matched against piece names, e.g. 'Smoke Jumper' or 'Thunderhead'."),
+            minCount: z.number().int().min(0).describe('Minimum number of pieces in the 5-set whose name contains `name` (e.g. 2 for a 2-piece set bonus).'),
+          }),
+        )
+        .optional()
+        .describe('Named-set count constraints, e.g. require 2 Smoke Jumper + 2 Thunderhead pieces. A piece matches if its name contains the substring.'),
+      fresh: FRESH,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ characterId, target, exotic, fragments, setConstraints, fresh }) => {
+    const inv = await getInventory({ force: fresh });
+    const character = inv.characters.find((c) => c.characterId === characterId);
+    if (!character) {
+      return text(`No character with id ${characterId}. Call get_character_state for the valid ids.`);
+    }
+    const pieces: LoadoutPiece[] = [];
+    for (const it of inv.items) {
+      const slot = slotOf(it.itemType);
+      if (!slot || !it.stats) continue;
+      // Armor must match the character's class (or be class-agnostic, classType 3).
+      if (it.classType !== character.classType && it.classType !== 3) continue;
+      pieces.push({
+        itemInstanceId: it.itemInstanceId ?? '',
+        name: it.name,
+        slot,
+        isExotic: it.tierType === 'Exotic',
+        classType: it.classType,
+        stats: it.stats,
+        energyCapacity: it.energyCapacity ?? 0,
+        plugHashes: it.plugHashes,
+        gearTier: it.gearTier,
+      });
+    }
+    const req: LoadoutTarget = {
+      classType: character.classType,
+      target: target as LoadoutTarget['target'],
+      exotic: exotic as LoadoutTarget['exotic'],
+      fragments: fragments as LoadoutTarget['fragments'],
+      setConstraints: setConstraints as LoadoutTarget['setConstraints'],
+    };
+    const result = solveLoadout(pieces, req);
+    return text(JSON.stringify(result, null, 2));
+  },
+);
 
 server.registerTool(
   'transfer_item',
