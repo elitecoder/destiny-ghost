@@ -100,6 +100,10 @@ When choosing which copies of a duplicated weapon to keep vs. dismantle:
    `options`, and returns the unreachable combos — surface those, don't hide.
    Pass `requiredAnyOf` to gate on a mandatory column (grenade launchers: keep
    only Spike/Disorienting copies).
+4b. **5% minimum popularity floor (added 2026-08-18).** Filter fetched combos to
+   `pct >= 5` before calling `planKeepers` — chasing every combo down to 3% turns
+   a 3-keeper weapon into a 6-keeper weapon for marginal coverage. List the
+   dropped sub-5% combos when presenting the plan, don't just drop them silently.
 5. **The planner is a decision-aid, not an oracle — surface, don't auto-apply.**
    It models trait1×trait2 + one required-perk gate only. It CANNOT see
    cross-column dependencies (a GL's Vorpal/Ambitious DPS trait is dead without
@@ -243,6 +247,8 @@ const copies: CopyRolls[] = active.map(c => ({
   trait1Options: c.perkColumns[2]?.options ?? [],  // column 3 = trait 1
   trait2Options: c.perkColumns[3]?.options ?? [],  // column 4 = trait 2
   allOptions: c.perkColumns.flatMap(col => col.options),  // for requiredAnyOf gate
+  locked: c.locked,      // tie-break: prefer an already-locked copy
+  gearTier: c.gearTier,  // tie-break: prefer the higher-tier copy (independent of perk rolls)
 }));
 
 const { keepers, unreachableCombos, ineligible } = planKeepers(copies, combos, requiredAnyOf);

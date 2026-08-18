@@ -108,7 +108,30 @@ test('planKeepers ties toward an already-locked copy over a higher-power unlocke
   assert.deepEqual(keepers.map((k) => k.itemInstanceId), ['LOCKED']);
 });
 
-test('planKeepers still breaks ties by power when neither or both copies are locked', () => {
+test('planKeepers ties toward the higher gearTier copy when lock state is equal', () => {
+  const combos = parseLightGgCombos(SALVO_HTML);
+  // Same reachable combo, neither locked. LOWTIER has higher power, but
+  // HIGHTIER should still win — tier and perk rolls are independent, so the
+  // higher-tier copy is the better one to hold onto for the same combo.
+  const copies: CopyRolls[] = [
+    { itemInstanceId: 'LOWTIER', powerLevel: 482, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], gearTier: 3 },
+    { itemInstanceId: 'HIGHTIER', powerLevel: 400, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], gearTier: 5 },
+  ];
+  const { keepers } = planKeepers(copies, combos);
+  assert.deepEqual(keepers.map((k) => k.itemInstanceId), ['HIGHTIER']);
+});
+
+test('planKeepers checks lock state before gearTier, and gearTier before power', () => {
+  const combos = parseLightGgCombos(SALVO_HTML);
+  const copies: CopyRolls[] = [
+    // Locked but low tier and low power — still wins on lock state alone.
+    { itemInstanceId: 'LOCKED_LOWTIER', powerLevel: 400, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], locked: true, gearTier: 1 },
+    { itemInstanceId: 'UNLOCKED_HIGHTIER', powerLevel: 482, trait1Options: ['Demolitionist'], trait2Options: ['Gear Shift'], locked: false, gearTier: 5 },
+  ];
+  assert.deepEqual(planKeepers(copies, combos).keepers.map((k) => k.itemInstanceId), ['LOCKED_LOWTIER']);
+});
+
+test('planKeepers still breaks ties by power when lock state and gearTier are both equal', () => {
   const combos = parseLightGgCombos(SALVO_HTML);
   // Neither locked: higher power wins, same as before the locked-preference fix.
   const neitherLocked: CopyRolls[] = [

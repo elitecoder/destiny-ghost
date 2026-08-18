@@ -34,6 +34,12 @@ export interface CopyRolls {
    *  prefers it in tie-breaking so we don't lock new copies when an existing
    *  locked copy covers the same combos. Optional: omit to ignore lock state. */
   locked?: boolean;
+  /** Armor 3.0 gear tier (1-5). When set, the planner prefers the higher-tier
+   *  copy in tie-breaking (after lock state), since tier and perk rolls are
+   *  independent — a tier-5 copy is no more likely to roll a given combo, but
+   *  is the better copy to hold onto when two copies cover the same ground.
+   *  Optional: omit to ignore tier. */
+  gearTier?: number;
 }
 
 /**
@@ -171,18 +177,21 @@ export function planKeepers(
   const comboByKey = new Map(combos.map((c) => [comboKey(c), c]));
 
   while (uncovered.size > 0) {
-    let best: { id: string; gain: number; power: number; locked?: boolean } | null = null;
+    let best: { id: string; gain: number; power: number; locked?: boolean; gearTier?: number } | null = null;
     for (const [id, { copy, keys }] of byCopy) {
       if (keepers.some((k) => k.itemInstanceId === id)) continue;
       const gain = [...keys].filter((k) => uncovered.has(k)).length;
       if (gain === 0) continue;
+      const lockedEqual = (copy.locked ?? false) === (best?.locked ?? false);
+      const gearTierEqual = (copy.gearTier ?? 0) === (best?.gearTier ?? 0);
       if (
         !best ||
         gain > best.gain ||
         (gain === best.gain && (copy.locked ?? false) && !(best.locked ?? false)) ||
-        (gain === best.gain && (copy.locked ?? false) === (best.locked ?? false) && copy.powerLevel > best.power)
+        (gain === best.gain && lockedEqual && (copy.gearTier ?? 0) > (best.gearTier ?? 0)) ||
+        (gain === best.gain && lockedEqual && gearTierEqual && copy.powerLevel > best.power)
       ) {
-        best = { id, gain, power: copy.powerLevel, locked: copy.locked };
+        best = { id, gain, power: copy.powerLevel, locked: copy.locked, gearTier: copy.gearTier };
       }
     }
     if (!best) break; // no copy covers any remaining combo
