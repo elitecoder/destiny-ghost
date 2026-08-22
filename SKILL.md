@@ -195,13 +195,24 @@ and ~160 keep / ~240 infuse decisions.
 
 ### Step 1: Find candidates
 
-Run `scratch/vault-weapons-over4.ts` (or equivalent) to list weapons with 5+ copies,
-sorted by copy count. The script groups by `name` (not `itemHash`), filters armor
-via `itemType` (Helmet/Gauntlets/Chest Armor/Leg Armor/Class Item/Warlock Bond), and
-excludes exotics. Prioritize by **untagged count** (copies still needing a decision),
-then by total copy count.
+Run `npm run vault-report` — the whole-account bird's-eye view (`src/scoring/vault-report.ts`
++ `src/bungie/vault-report-cli.ts`). Farming never stops, so re-deriving "what's the
+biggest pile" per weapon-at-a-time doesn't scale; run this at the START of every
+triage session, not just after a farming binge. It prints, in one shot:
+- **Weapon dupes** (5+ copies, sorted by total count) — `total`, `untagged`, `locked`.
+- **Armor by class × slot** — across ALL THREE classes, not just whichever one you
+  triaged last. Catches the "Hunter/Titan armor nobody ever looked at" blind spot.
+- **Lock/tag contradictions** — items tagged infuse/junk/archive while still locked.
+  Never auto-resolve; surface the `itemInstanceId` and ask.
+- **Named-set risk** — armor sharing a name prefix across 2+ slots (e.g. "Thunderhead
+  Boots" + "Thunderhead Bond") where a piece got tagged infuse. The tertiary/floor
+  armor planner has no concept of set bonuses, so this is the guardrail that catches
+  a wrongly-rejected set piece before the user dismantles it.
 
-Key fields: `count`, `untagged` (no DIM tag yet), `locked` (already locked).
+Prioritize weapons by **total copy count** first (that's what "biggest pile" means),
+then by untagged count within a tie. Always resolve lock/tag contradictions and
+named-set risks BEFORE starting a fresh armor pass — they're evidence of a prior
+mistake, not just backlog.
 
 ### Step 2: Recon each weapon
 
