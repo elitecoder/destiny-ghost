@@ -11,6 +11,7 @@
     "auth": "tsx src/bungie/auth-cli.ts",
     "manifest": "tsx src/bungie/manifest-cli.ts",
     "mcp": "tsx src/mcp/server.ts",
+    "vault-report": "tsx src/bungie/vault-report-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx test/*.test.ts"
   },
