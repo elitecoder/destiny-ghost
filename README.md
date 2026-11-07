@@ -1,89 +1,152 @@
-# 👻 Ghost — a talk-in-chat Destiny 2 item manager
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner-dark.png">
+  <img alt="Ghost: manage your Destiny 2 gear by talking to your AI." src="docs/images/banner-light.png">
+</picture>
 
-Manage your Destiny 2 gear by talking to your LLM. Ghost is an **MCP server** that
-exposes the Bungie API as tools — inspect inventory, grade weapon rolls, and
-move/equip/lock items — the way [DIM](https://github.com/DestinyItemManager/DIM)
-and [Destiny Recipes](https://destinyrecipes.com) do, but conversational.
+**An MCP server that lets your AI manage your Destiny 2 gear.**
 
-**No Anthropic API key, no web server, no agent loop.** Your chat model *is* the
-intelligence; Ghost just gives it hands.
+Add Ghost to Claude Code, then ask which hand cannons are worth keeping, where your Fatebringer is, or whether your armor can hit a build. Ghost reads your inventory, grades your weapon rolls, and moves, equips, locks, and tags items for you. It does what [DIM](https://github.com/DestinyItemManager/DIM) and [Destiny Recipes](https://destinyrecipes.com) do, in a conversation.
 
-> **Safety by design:** the Bungie API exposes **no dismantle/delete endpoint**, so
-> Ghost physically cannot destroy your gear. "Clean my vault" means *lock the keepers,
-> unlock the rejects* — you do the actual dismantle in-game. Write tools default to
-> `dry_run: true`, so the model previews a plan and you confirm before anything changes.
+You don't need an Anthropic API key. Your AI does the thinking, and Ghost gives it access to your gear.
 
-## What it does
+Ghost comes in two pieces:
 
-- **Ask about your gear** — "what's my lowest-power slot", "where's my Fatebringer".
-  (`get_character_state`, `search_inventory`)
-- **Grade rolls** — "score my hand cannons for PvP", "is this a keeper?" — via the DIM
-  community god-roll wishlist (the source Destiny Recipes uses). (`score_items`)
-- **Act, behind confirmation** — move between characters/vault, equip, lock/unlock, pull
-  from the postmaster. (`transfer_item`, `equip_item`, `set_lock`, `pull_postmaster`)
+- **The MCP server** gives your AI 11 tools for your Destiny 2 account. This is Ghost.
+- **The skill**, `SKILL.md`, is the playbook that comes with it. It teaches Claude Code to show you every change before making it and to compare duplicate weapons perk by perk.
 
-## How it fits together
+## What you can ask
 
-```
-You ⇄ chat ⇄ your LLM ⇄ destiny-ghost MCP server ⇄ Bungie API
-                          │  (OAuth token stays on your disk)
-              OAuth · manifest cache · GetProfile · write actions · roll scoring
-```
+| You ask | Ghost uses |
+|---|---|
+| "What's my lowest-power slot?" | `get_character_state` |
+| "Where's my Fatebringer?" | `search_inventory` |
+| "Which of my hand cannons are god rolls for PvP?" | `score_items` |
+| "I have four copies of this scout rifle. Which should I keep?" | `inspect_rolls`, then the keeper planner |
+| "Can I hit 100 Weapons and 70 Health with the armor I have?" | `find_armor_set` |
+| "Move Fatebringer to my Warlock and equip it." | `transfer_item`, `equip_item` |
+| "Lock the keepers and tag the rest infuse." | `set_lock`, `set_tag` |
+| "What have I tagged junk in DIM?" | `get_tags` |
+| "Pull that exotic out of the postmaster." | `pull_postmaster` |
 
-- **`src/bungie/`** — OAuth2 (code + refresh; tokens at `~/.destiny-ghost/`, mode 0600),
-  throttle-aware HTTP client (obeys `ThrottleSeconds`), manifest cache/resolver,
-  `GetProfile` → flattened inventory, write actions (char→char vault-hop planner +
-  idempotent re-reads).
-- **`src/scoring/`** — ingests the upstream DIM `voltron.txt` wishlist; scores rolls S–F.
-- **`src/mcp/server.ts`** — the MCP stdio server: 7 tools; writes default `dry_run: true`.
+## How it works
 
-The confirmation gate lives in the model (guided by the Skill): preview → your explicit
-yes → execute. See `~/.claude/skills/destiny-ghost/SKILL.md`.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/how-it-works-dark.png">
+  <img alt="You talk to your chat AI in plain English. The AI calls Ghost's tools. Ghost, an MCP server on your Mac, talks to the Bungie API for inventory, moves, equips, and locks; to DIM Sync for tags and notes; and to the DIM wishlist for community god rolls. Login tokens stay on disk, readable only by you." src="docs/images/how-it-works-light.png">
+</picture>
 
-## Setup (one-time)
+Inside the server:
 
-```bash
-npm install
+- **The tools** (`src/mcp/server.ts`) are what your AI calls.
+- **The Bungie client** (`src/bungie/`) handles the OAuth login, waits as long as the API asks between calls, caches the game's item database, and plans moves. Moving an item between characters takes more than one call, because it goes through the vault.
+- **The planners** (`src/scoring/`) grade rolls against the DIM community wishlist, pick the fewest copies of a weapon that cover every good perk combination, and search all your armor for a set that hits your stat targets.
 
-# 1. Register a Bungie app at https://www.bungie.net/en/Application
-#      OAuth Client Type: Confidential
-#      Redirect URL:      https://127.0.0.1:7777/callback   (exact)
-#      Scopes:            Read Destiny inventory/vault + Move or equip Destiny gear
-cp .env.example .env        # paste API key + client id/secret (no Anthropic key needed)
+The skill adds what the tools can't know on their own: the current Armor 3.0 stat names, the perk-by-perk way to compare duplicates, and the safety rules below.
 
-# 2. Log in to Bungie once (opens your browser; tokens saved to ~/.destiny-ghost/)
-npm run auth
+## Safety
 
-# 3. (optional) pre-download the manifest
-npm run manifest
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/vault-cleanup-dark.png">
+  <img alt="Cleaning a vault: inspect every perk option, plan the fewest keepers that cover every good perk combination, show a dry run of exactly what would change, wait for your yes, then lock the keepers and tag the rest infuse. You dismantle in-game. Already-locked items are never unlocked." src="docs/images/vault-cleanup-light.png">
+</picture>
 
-# 4. Register the MCP server with your client (Claude Code shown)
-claude mcp add destiny-ghost -- npx tsx "$(pwd)/src/mcp/server.ts"
-```
+- **Ghost can't delete anything.** The Bungie API has no dismantle call. When you ask Ghost to clean your vault, it locks the keepers and tags the rest `infuse`, and you dismantle them in-game.
+- **Every change starts as a preview.** Write tools default to `dry_run: true` and return a plan without changing anything. The skill tells your AI to show you the plan and wait for an explicit yes before it applies it.
+- **Locked items stay locked.** If you locked an item yourself and the planner didn't pick it, Ghost lists it for you to decide on. It never unlocks it.
+- **Your login stays on your Mac.** Bungie and DIM tokens live in `~/.destiny-ghost/`, readable only by you.
 
-Then just talk: *"score my hand cannons for PvP"*, *"clean my vault, keep PvE god rolls"*,
-*"move Fatebringer to my Warlock and equip it."*
+## Quick start
 
-> **mkcert (optional):** the OAuth callback needs an HTTPS localhost cert. Without
-> `mkcert`, Ghost mints a self-signed cert and your browser warns once during login —
-> that's expected. `mkcert -install` silences it.
+You need:
+
+- Node.js 22 or later.
+- Claude Code, or another app that supports MCP servers.
+- A Bungie.net account, so you can register a developer app.
+
+1. Clone the repository and install its dependencies. The skill expects the repository at `~/dev/destiny-ghost`.
+
+   ```bash
+   git clone https://github.com/elitecoder/destiny-ghost.git ~/dev/destiny-ghost
+   cd ~/dev/destiny-ghost
+   npm install
+   ```
+
+2. Register an app at [bungie.net/en/Application](https://www.bungie.net/en/Application) with these settings:
+
+   - **OAuth client type:** Confidential
+   - **Redirect URL:** `https://127.0.0.1:7777/callback`, exactly as written
+   - **Scopes:** Read your Destiny 2 information, and Move or equip Destiny gear
+
+3. Copy the example settings file, then paste in your app's API key, client ID, and client secret:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+4. Sign in to Bungie once. This opens your browser and saves your tokens to `~/.destiny-ghost/`.
+
+   ```bash
+   npm run auth
+   ```
+
+   The sign-in page runs on a local HTTPS address. If you have [mkcert](https://github.com/FiloSottile/mkcert) installed, Ghost uses a certificate your browser trusts. Otherwise your browser warns you once about a self-signed certificate, which is expected.
+
+5. Add Ghost to Claude Code:
+
+   ```bash
+   claude mcp add destiny-ghost -- npx tsx ~/dev/destiny-ghost/src/mcp/server.ts
+   ```
+
+6. Install the skill:
+
+   ```bash
+   mkdir -p ~/.claude/skills/destiny-ghost
+   ln -s ~/dev/destiny-ghost/SKILL.md ~/.claude/skills/destiny-ghost/SKILL.md
+   ```
+
+Then ask: "Score my hand cannons for PvP," or "Clean my vault, and keep the PvE god rolls."
+
+DIM tags work without extra setup. The first time you use a tag tool, Ghost exchanges your Bungie login for a DIM Sync token.
+
+## Tools
+
+| Tool | What it does | Changes your gear |
+|---|---|---|
+| `get_character_state` | Lists your characters, their power, vault space, and postmaster counts. | No |
+| `search_inventory` | Finds items from a plain-English description, such as "void hand cannons in the vault." | No |
+| `score_items` | Grades weapons S through F against the DIM community wishlist, for PvE or PvP. | No |
+| `inspect_rolls` | Shows every selectable perk in each column, the basis for keeping or dismantling duplicates. | No |
+| `get_tags` | Reads your DIM tags and notes. | No |
+| `find_armor_set` | Searches all your armor for a five-piece set that hits your stat targets, or names the stat you need to farm. | No |
+| `transfer_item` | Moves an item to the vault or another character. | Yes, preview first |
+| `equip_item` | Equips an item. Works only in orbit, social spaces, or offline. | Yes, preview first |
+| `set_lock` | Locks or unlocks an item. | Yes, preview first |
+| `set_tag` | Sets or clears DIM tags on one or many items. | Yes, preview first |
+| `pull_postmaster` | Moves an item from the postmaster to its character. | Yes, preview first |
+
+## Vault report
+
+`npm run vault-report` prints a summary of your whole account:
+
+- Items by tier.
+- Weapons you have five or more copies of.
+- Armor counts by class and slot.
+- Items tagged infuse, junk, or archive that are still locked.
+- Armor sets with a piece tagged infuse, junk, or archive, so you can review them before you dismantle.
 
 ## Development
 
 ```bash
-npm run typecheck   # tsc --noEmit
-npm test            # node:test — pure-logic unit tests (transfer planner)
-npm run mcp         # run the server standalone on stdio
+npm run typecheck   # check types
+npm test            # run the 51 unit tests
+npm run mcp         # start the MCP server on stdio
 ```
 
-## Status & caveats
+The planners take plain data, with no network calls, so the tests run offline.
 
-- All 7 tools, scoring, OAuth, manifest, and the Skill are implemented; typecheck clean,
-  unit tests pass, the MCP server is verified to boot and list its tools over stdio.
-- **Not yet exercised against a live Bungie account** — that needs your one-time OAuth
-  login (`npm run auth`).
-- Wishlist scoring is community-authored and advisory; verdicts surface the wishlist
-  version. There is no first-class "PvP" flag in the game — "best for PvP" is the
-  wishlist PvP ranking.
-- Rate limits are mostly unpublished; Ghost obeys the API's `ThrottleSeconds` rather than
-  hardcoding a rate. Review Bungie's API Terms before any public use.
+## Limits
+
+- Roll grades come from a community wishlist and are advice, not fact. The game has no PvP flag, so "best for PvP" means the wishlist's PvP ranking.
+- Lock and tag changes can take a moment to show in the game and in DIM.
+- Bungie doesn't publish most of its rate limits. Ghost waits as long as each response asks.
+- Read Bungie's API terms before you share your app with other players.
